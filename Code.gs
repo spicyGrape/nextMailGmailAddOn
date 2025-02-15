@@ -1,8 +1,4 @@
 /**
- * This function builds the add-on’s UI when an email is opened.
- * It is triggered via the contextual trigger in the manifest.
- */
-/**
  * Combined buildAddOn function that shows the email subject, classification, summary,
  * and provides quick feedback buttons and a detailed feedback text input.
  */
@@ -67,6 +63,171 @@ function buildAddOn(e) {
   card.addSection(section);
   return card.build();
 }
+
+/**
+ * Classify the email using the OpenAI Chat Completions API.
+ */
+function classifyEmail(subject, snippet) {
+  // Retrieve custom labels from user properties (if configured), or use defaults.
+  var userProperties = PropertiesService.getUserProperties();
+  var customLabels = userProperties.getProperty("customLabels") || "Important Information,Unimportant,Requires Action,Requires Reply";
+  
+  var prompt = "Classify the following email into one of these categories: " 
+      + customLabels + ".\n\nEmail Subject: " + subject + "\nEmail Snippet: " + snippet + "\nCategory:";
+  
+  var apiKey = "YOUR_OPENAI_API_KEY"; // Replace with your actual API key.
+  var url = "https://api.openai.com/v1/chat/completions";
+  
+  var payload = {
+    "model": "gpt-3.5-turbo",  // Or "gpt-4" if available.
+    "messages": [
+      {"role": "system", "content": "You are an intelligent email categorizer that uses predefined labels."},
+      {"role": "user", "content": prompt}
+    ],
+    "max_tokens": 10,
+    "temperature": 0.3
+  };
+  
+  var options = {
+    "method": "post",
+    "contentType": "application/json",
+    "headers": {
+      "Authorization": "Bearer " + apiKey
+    },
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    Logger.log("Classification response code: " + response.getResponseCode());
+    Logger.log("Classification response text: " + response.getContentText());
+    var result = JSON.parse(response.getContentText());
+    if (result && result.choices && result.choices.length > 0 && result.choices[0].message) {
+      return result.choices[0].message.content.trim();
+    }
+  } catch (err) {
+    Logger.log("Error calling classification API: " + err);
+  }
+  return "Unknown";
+}
+
+/**
+ * Generate a summary of the email using the OpenAI Chat Completions API.
+ */
+function summarizeEmail(subject, snippet) {
+  var emailContent = "Subject: " + subject + "\n\nContent: " + snippet;
+  var prompt = "Please provide a concise summary (a few sentences) of the following email:\n\n" + emailContent;
+  
+  var apiKey = "YOUR_OPENAI_API_KEY"; // Replace with your actual API key.
+  var url = "https://api.openai.com/v1/chat/completions";
+  
+  var payload = {
+    "model": "gpt-3.5-turbo", // or "gpt-4" if available.
+    "messages": [
+      {"role": "system", "content": "You are a helpful email summarizer."},
+      {"role": "user", "content": prompt}
+    ],
+    "max_tokens": 60,
+    "temperature": 0.5
+  };
+  
+  var options = {
+    "method": "post",
+    "contentType": "application/json",
+    "headers": {
+      "Authorization": "Bearer " + apiKey
+    },
+    "payload": JSON.stringify(payload),
+    "muteHttpExceptions": true
+  };
+  
+  try {
+    var response = UrlFetchApp.fetch(url, options);
+    Logger.log("Summarization response code: " + response.getResponseCode());
+    Logger.log("Summarization response text: " + response.getContentText());
+    var result = JSON.parse(response.getContentText());
+    if (result && result.choices && result.choices.length > 0 && result.choices[0].message) {
+      return result.choices[0].message.content.trim();
+    }
+  } catch (err) {
+    Logger.log("Error calling summarization API: " + err);
+  }
+  return "Summary not available.";
+}
+
+/**
+ * Handles quick feedback (Correct/Incorrect) from the user.
+ */
+function handleFeedback(e) {
+  var params = e.parameters;
+  var feedback = params.feedback;
+  var messageId = params.messageId;
+  
+  // For this prototype, we simply log the feedback.
+  Logger.log("Feedback for message " + messageId + ": " + feedback);
+  
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText("Feedback submitted. Thank you!"))
+    .build();
+}
+
+/**
+ * Handles detailed feedback submission from the user.
+ */
+function handleDetailedFeedback(e) {
+  var formInputs = e.commonEventObject.formInputs;
+  var messageId = e.parameters.messageId;
+  var detailedFeedback = formInputs.detailedFeedback.stringInputs.value[0];
+  
+  Logger.log("Detailed feedback for message " + messageId + ": " + detailedFeedback);
+  
+  return CardService.newActionResponseBuilder()
+    .setNotification(CardService.newNotification().setText("Detailed feedback submitted. Thank you!"))
+    .build();
+}
+
+/**
+ * Optional: Show a configuration card to let users define custom labels.
+ */
+function showConfigCard() {
+  var userProperties = PropertiesService.getUserProperties();
+  var savedLabels = userProperties.getProperty("customLabels") || "Important Information,Unimportant,Requires Action,Requires Reply";
+  
+  var card = CardService.newCardBuilder();
+  var section = CardService.newCardSection()
+      .addWidget(
+        CardService.newTextInput()
+          .setFieldName("labelsInput")
+          .setTitle("Custom Labels")
+          .setHint("Enter labels separated by commas")
+          .setValue(savedLabels)
+      );
+  
+  var saveAction = CardService.newAction().setFunctionName("saveCustomLabels");
+  section.addWidget(
+    CardService.newTextButton()
+      .setText("Save Labels")
+      .setOnClickAction(saveAction)
+  );
+  
+  card.addSection(section);
+  return card.build();
+}
+
+/**
+ * Saves the custom labels input by the user.
+ */
+function saveCustomLabels(e) {
+  var formInputs = e.commonEventObject.formInputs;
+  var labelsInput = formInputs.labelsInput.stringInputs.value[0];
+  PropertiesService.getUserProperties().setProperty("customLabels", labelsInput);
+  
+  return CardService.newActionResponseBuilder()
+      .setNotification(CardService.newNotification().setText("Custom labels saved!"))
+      .build();
+}
+
 
 /**
  * Handles detailed feedback submission from the user.
